@@ -1,63 +1,81 @@
 # 🚀 Multi-Agent Corporate Intelligence Hub
 
-An industrial-grade, local-first multi-agent system built using **LangGraph** and the **OpenAI Agent SDK**. This project demonstrates advanced agentic patterns, including autonomous handoffs, structured Pydantic I/O, and self-correcting audit loops—all running on local models via **Ollama**.
+A **production-ready**, local-first multi-agent system built with **LangGraph** and the **OpenAI Agent SDK**. Demonstrates advanced agentic patterns — autonomous handoffs, structured Pydantic I/O, self-correcting audit loops, and graceful error recovery — all running locally via **Ollama**.
 
 ---
 
 ## 🏗️ Architecture
 
-The system follows a **Manager-Specialist** pattern orchestrated by a cyclic LangGraph DAG.
+The system follows a **Manager-Specialist** pattern orchestrated by a cyclic LangGraph DAG with automatic retry and self-correction.
 
 ```mermaid
 graph TD
-    User((User)) --> Intake[Intake & Triage Node]
+    User((User Input)) --> Validate[Input Validation]
+    Validate --> Intake[Intake & Triage Node]
     Intake --> Manager{Manager Agent}
     Manager --> |Internal| Librarian[Librarian Agent]
-    Manager --> |External| Scholar[Scholar Agent]
+    Manager --> |External| Scholar[Scholar Agent + DDG Tool]
     Librarian --> Synthesis[Synthesizer Agent]
     Scholar --> Synthesis
-    Synthesis --> Audit[Auditor Agent]
-    Audit --> |Reject| Intake
-    Audit --> |Approve| Output((Final JSON Output))
+    Synthesis --> |CorporateMemo| Audit[Auditor Agent]
+    Audit --> |REJECTED max 3x| Intake
+    Audit --> |APPROVED| Output((JSON Output))
 ```
 
 ### 🤖 The Agent Team
-1.  **The Manager**: Primary entry point. Triages requests and performs dynamic handoffs.
-2.  **The Librarian**: specialist in internal JSON records and proprietary knowledge.
-3.  **The Scholar**: specialist in external research using the **DuckDuckGo** tool.
-4.  **The Synthesizer**: Senior Analyst that merges raw data into a structured `CorporateMemo`.
-5.  **The Auditor**: Quality Control agent that validates the final output against a strict `AuditReview` schema.
+
+| Agent | Role | Output Type |
+|-------|------|-------------|
+| **Manager** | Triages queries, performs handoffs | Plain text |
+| **Librarian** | Searches internal JSON knowledge base | Plain text |
+| **Scholar** | Searches the web via DuckDuckGo | Plain text |
+| **Synthesizer** | Merges findings into a structured memo | `CorporateMemo` |
+| **Auditor** | Validates quality, approves/rejects | `AuditReview` |
 
 ---
 
-## 💎 Key Features
+## 💎 Production-Ready Features
 
--   **100% Local-First**: Uses Ollama (`qwen3-vl:235b-cloud`) to ensure data privacy and zero API costs.
--   **Structured I/O**: Every tool input and agent output is strictly validated using **Pydantic** models.
--   **Persistence (Memory)**: Uses LangGraph `MemorySaver` to maintain state across multi-turn conversations.
--   **Self-Correction**: An automated Audit loop that triggers re-research if a memo fails quality standards.
--   **JSON-Native Interface**: Optimized for headless integration; input is captured as strings and results are delivered as clean JSON.
+### Input Validation
+- `QueryInput` Pydantic model with `min_length=3`, `max_length=500`
+- Prompt-injection guard (blocks `<script>`, `DROP TABLE`, etc.)
+- Empty/whitespace rejection
+
+### Output Validation
+- `CorporateMemo` and `AuditReview` enforced via `output_type` on agents
+- All list fields use `default_factory=list` to prevent `""` vs `[]` errors
+
+### Error Recovery
+- `run_structured_agent()` — automatic retry with prompt hints on JSON validation failures
+- `clean_and_parse()` — strips Markdown fences and extracts JSON from mixed output
+- Graceful degradation: errors are returned as structured JSON, not raw tracebacks
+
+### Persistence & Observability
+- LangGraph `MemorySaver` maintains state across multi-turn conversations
+- Structured `logging` (no `print()`) with timestamps and severity levels
+- `Settings` class validated at startup via Pydantic — app fails fast on bad `.env`
 
 ---
 
 ## 🛠️ Tech Stack
 
--   **Orchestration**: [LangGraph](https://github.com/langchain-ai/langgraph)
--   **Agent Framework**: [OpenAI Agent SDK](https://github.com/openai/openai-agents-python)
--   **Model Backend**: [Ollama](https://ollama.com/)
--   **Search**: [DuckDuckGo Search](https://python.langchain.com/docs/integrations/tools/ddg/)
--   **Validation**: [Pydantic v2](https://docs.pydantic.dev/latest/)
+| Component | Technology |
+|-----------|-----------|
+| Orchestration | [LangGraph](https://github.com/langchain-ai/langgraph) |
+| Agent Framework | [OpenAI Agent SDK](https://github.com/openai/openai-agents-python) |
+| Model Backend | [Ollama](https://ollama.com/) (local) |
+| Web Search | [DuckDuckGo Search](https://python.langchain.com/docs/integrations/tools/ddg/) |
+| Validation | [Pydantic v2](https://docs.pydantic.dev/latest/) |
+| Config | `pydantic.BaseModel` with `@field_validator` |
 
 ---
 
 ## 🚀 Getting Started
 
 ### 1. Prerequisites
--   Install **Ollama** and pull the required model:
-    ```bash
-    ollama pull qwen3-vl:235b-cloud
-    ```
--   Install **uv** (recommended Python manager).
+```bash
+ollama pull qwen3-vl:235b-cloud
+```
 
 ### 2. Installation
 ```bash
@@ -67,7 +85,7 @@ uv sync
 ```
 
 ### 3. Environment Setup
-Create a `.env` file in the root:
+Create a `.env` file:
 ```env
 OPENAI_BASE_URL=http://localhost:11434/v1
 OPENAI_API_KEY=ollama
@@ -75,7 +93,7 @@ LOCAL_MODEL_NAME=qwen3-vl:235b-cloud
 DATABASE_PATH=data/knowledge.json
 ```
 
-### 4. Running the Assistant
+### 4. Run
 ```bash
 uv run python main.py
 ```
@@ -84,32 +102,57 @@ uv run python main.py
 
 ## 📝 Example Queries
 
-Test the system with these prompts:
--   **Internal**: *"When is our salary processed each month?"*
--   **Web Search**: *"What is the latest stock price and news for NVIDIA today?"*
--   **Hybrid**: *"Compare our office hours with working culture trends in San Francisco for 2026."*
+| Type | Query |
+|------|-------|
+| **Internal** | `When is our salary processed each month?` |
+| **Internal** | `What are the office hours for the main branch?` |
+| **Web** | `What is the latest stock price and news for NVIDIA?` |
+| **Web** | `What are the top AI agent headlines in 2026?` |
+| **Hybrid** | `Compare our office hours with Silicon Valley work culture trends in 2026` |
 
 ---
 
 ## 📂 Project Structure
-```text
+```
 .
-├── main.py                 # CLI Entry point & JSON Output logic
+├── main.py                    # CLI Entry point with input validation & JSON output
 ├── data/
-│   └── knowledge.json      # Pure internal knowledge base
+│   └── knowledge.json         # Internal knowledge base
 └── src/
     ├── core/
-    │   ├── config.py       # Global logging & environment
-    │   └── state.py        # Pydantic schemas (Memo, Audit, Search)
+    │   ├── config.py           # Pydantic-validated Settings, logging, telemetry
+    │   └── state.py            # All Pydantic schemas (Input, Output, State)
     ├── agent_logic/
-    │   └── definitions.py  # Agent personas & output_types
+    │   └── definitions.py      # Agent personas with output_type enforcement
     ├── workflow/
-    │   └── graph.py        # LangGraph DAG & Robust JSON parsing
+    │   └── graph.py            # LangGraph DAG, retry logic, JSON cleaner
     ├── tools/
-    │   └── web_tools.py    # Structured DuckDuckGo tool
+    │   └── web_tools.py        # Structured DuckDuckGo tool with logging
     └── repository/
-        └── internal_db.py  # Local JSON search logic
+        └── internal_db.py      # Typed KnowledgeRecord search with error handling
 ```
 
 ---
-*Created by Antigravity - A Gold Standard Reference for Local-First Multi-Agent Systems.*
+
+## 🏆 Best Practice Checklist
+
+| # | Practice | Status |
+|---|----------|--------|
+| 1 | Structured Input Validation (Pydantic) | ✅ |
+| 2 | Structured Output Enforcement (`output_type`) | ✅ |
+| 3 | Prompt-Injection Guard | ✅ |
+| 4 | Fail-Fast Config Validation | ✅ |
+| 5 | Structured Logging (no `print()`) | ✅ |
+| 6 | Automatic Retry on LLM Validation Errors | ✅ |
+| 7 | Markdown/JSON Cleaner for Local Models | ✅ |
+| 8 | Memory Persistence (`MemorySaver`) | ✅ |
+| 9 | Self-Correcting Audit Loop | ✅ |
+| 10 | Agent Handoffs (OpenAI SDK) | ✅ |
+| 11 | Typed Tool Input (`SearchConfig`) | ✅ |
+| 12 | Typed DB Records (`KnowledgeRecord`) | ✅ |
+| 13 | JSON-Native Error Responses | ✅ |
+| 14 | Telemetry Disabled for Local Use | ✅ |
+
+---
+
+*Gold-standard reference architecture for local-first multi-agent systems.*

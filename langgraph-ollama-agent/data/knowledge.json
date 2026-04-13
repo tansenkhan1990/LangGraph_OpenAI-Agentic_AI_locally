@@ -1,0 +1,12 @@
+{
+  "records": [
+    {
+      "topic": "salary",
+      "content": "Salaries are processed on the 25th of each month via direct deposit."
+    },
+    {
+      "topic": "office",
+      "content": "The main office is open from 9 AM to 6 PM, Monday through Friday."
+    }
+  ]
+}

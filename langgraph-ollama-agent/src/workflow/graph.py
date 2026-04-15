@@ -1,11 +1,12 @@
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
-from agents import Runner
-from agents.exceptions import ModelBehaviorError
+from agents import Agent, Runner
 from src.core.state import AgentState, CorporateMemo, AuditReview
 from src.repository.internal_db import InternalDB
 from src.agent_logic.definitions import manager, librarian, scholar, synthesizer, auditor
 from src.core.config import logger
+from pydantic import BaseModel
+from typing import Type
 import json
 import re
 
@@ -17,7 +18,7 @@ MAX_RETRIES = 2  # Per-node retry limit for structured output failures
 
 # ─── Utility: Robust JSON Cleaner ────────────────────────────────────────────
 
-def clean_and_parse(text: str, model_class):
+def clean_and_parse(text: str, model_class: Type[BaseModel]) -> BaseModel:
     """
     Extracts valid JSON from raw LLM output that may be wrapped in
     Markdown fences or contain trailing text. Validates against a
@@ -40,7 +41,12 @@ def clean_and_parse(text: str, model_class):
     return model_class(**data)
 
 
-def run_structured_agent(agent, prompt, model_class, retries=MAX_RETRIES):
+def run_structured_agent(
+    agent: Agent,
+    prompt: str,
+    model_class: Type[BaseModel],
+    retries: int = MAX_RETRIES
+) -> BaseModel:
     """
     Runs an agent with output_type and handles common local-model failures:
     - Markdown-wrapped JSON
@@ -65,16 +71,18 @@ def run_structured_agent(agent, prompt, model_class, retries=MAX_RETRIES):
             if isinstance(output, dict):
                 return model_class(**output)
 
-            return output
+            raise TypeError(
+                f"Unsupported output type from agent '{agent.name}': {type(output).__name__}"
+            )
 
-        except (ModelBehaviorError, json.JSONDecodeError, Exception) as e:
+        except Exception as e:
             last_error = e
             if attempt < retries:
                 logger.warning(
                     f"Structured output attempt {attempt + 1}/{retries + 1} failed: {e}. Retrying..."
                 )
                 # Add a hint to the prompt for the retry
-                prompt = prompt + "\n\nIMPORTANT: Return ONLY valid JSON. No markdown."
+                prompt += "\n\nIMPORTANT: Return ONLY valid JSON. No markdown."
             else:
                 logger.error(f"All {retries + 1} attempts failed for {model_class.__name__}: {e}")
                 raise last_error
@@ -146,6 +154,8 @@ def audit_node(state: AgentState):
 
 def route_from_intake(state: AgentState):
     """Routes to Scholar (web) or Librarian (internal) based on Manager response."""
+    if not state.messages:
+        return "internal_research"
     last_msg = state.messages[-1]["content"].lower()
     if any(keyword in last_msg for keyword in ["scholar", "web", "external", "search", "online"]):
         return "web_research"

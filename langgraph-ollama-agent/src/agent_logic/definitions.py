@@ -1,12 +1,7 @@
-from openai import OpenAI
 from agents import Agent
 from src.core.config import settings
 from src.core.state import CorporateMemo, AuditReview
 from src.tools.web_tools import web_search_tool
-
-# ─── OpenAI Client (pointed at local Ollama) ─────────────────────────────────
-client = OpenAI(base_url=settings.BASE_URL, api_key=settings.API_KEY)
-
 
 # ─── 1. Specialist Agents ────────────────────────────────────────────────────
 

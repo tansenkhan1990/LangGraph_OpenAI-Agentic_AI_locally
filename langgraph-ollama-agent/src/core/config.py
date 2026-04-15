@@ -1,6 +1,6 @@
 import os
 import logging
-from pydantic import BaseModel, field_validator, AnyHttpUrl
+from pydantic import BaseModel, field_validator
 from dotenv import load_dotenv
 from agents import set_tracing_disabled
 
